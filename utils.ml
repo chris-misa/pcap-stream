@@ -81,10 +81,29 @@ let find_float key t =
     float_of_op_result (Tuple.find key t)
 
 (*
- * groupby utilities
+ * Tuple key operations
  **************************************************************************************)
+
 let filter_keys (keys : string list) (p : tuple) : tuple =
     Tuple.filter (fun k _ -> List.mem k keys) p
+
+let rename_keys renamings (p : tuple) : tuple =
+    let f k v a =
+        List.find_map (fun (oldk, newk) ->
+            if oldk = k
+            then Some (Tuple.add newk v a)
+            else None
+        ) renamings 
+    in
+    Tuple.fold (fun k v a ->
+        match f k v a with
+            | Some new_a -> new_a
+            | None -> a
+    ) p Tuple.empty
+
+(*
+ * groupby aggregation functions
+ **************************************************************************************)
 
 let count (r : op_result) (_ : tuple) : op_result =
     match r with

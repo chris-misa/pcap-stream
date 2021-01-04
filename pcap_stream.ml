@@ -66,14 +66,18 @@ let epoch (dur : float) (s : tuple stream) : tuple stream =
 
 let init_table_size = 1000
 
-let groupby (k : tuple -> tuple) (f : op_result -> tuple -> op_result) (res_key : string) (s : tuple stream) : tuple stream =
-    let last_eid = ref 0 in
+let split_on_epoch last_eid s =
     s
     |> Stream.split ~by:(fun p ->
         match Tuple.find_opt "epoch" p with
             | Some (Int eid) -> (last_eid := eid ; true)
             | _ -> false
     )
+
+let groupby (k : tuple -> tuple) (f : op_result -> tuple -> op_result) (res_key : string) (s : tuple stream) : tuple stream =
+    let last_eid = ref 0 in
+    s
+    |> split_on_epoch last_eid
     |> Stream.flat_map (fun epoch ->
         let m = Hashtbl.create init_table_size in
         (* Fold the stream for this epoch into a hash table using k and f *)
@@ -91,6 +95,60 @@ let groupby (k : tuple -> tuple) (f : op_result -> tuple -> op_result) (res_key 
         |> Stream.append (tuple_of_list [("epoch", Int !last_eid)])
     )
 
+(* BROKEN *)
+let split s_in =
+    let clone s =
+        Stream.unfold s (fun s ->
+            match Stream.first s with (* the problem is this consumes s! *)
+                | Some a -> Some (a, Stream.prepend a s) (* then this just reverse the progress *)
+                | None -> None
+        )
+    in (clone s_in, clone s_in)
+
+(* this can probably be simplified a bunch by
+1. Converting the two input streams to sources (use Source.unfold as below generically)
+2. using Source.zip_with 
+*)
+let join (lkey : tuple -> (tuple * tuple)) (rkey : tuple -> (tuple * tuple)) l r =
+    let ltbl = Hashtbl.create init_table_size in
+    let rtbl = Hashtbl.create init_table_size in
+    let proc_one m m' f p_opt =
+        match p_opt with
+            | Some p -> (
+                let k, v = f p in
+                match Hashtbl.find_opt m' k with
+                    | Some v' ->
+                        let use_left = fun _ a _ -> Some a in
+                        Some (Tuple.union use_left k (Tuple.union use_left v v'))
+                    | None -> (
+                        Hashtbl.replace m k v;
+                        None
+                    )
+            )
+            | None -> None
+    in
+    (* Merge left and right strings into a stream of (left,right) tuples *)
+    Stream.from (
+        Source.unfold (l,r) (fun (l, r) ->
+            match (Stream.first l, Stream.first r) with (* Don't need Stream.rest l/r? *)
+                | (Some a, Some b) -> Some ((Some a, Some b), (l, r))
+                | (Some a, None) -> Some ((Some a, None), (l, r))
+                | (None, Some b) -> Some ((None, Some b), (l, r))
+                | (None, None) -> None
+        )
+    )
+    (* Apply processing for packets in both left and right streams, merging results *)
+    |> Stream.flat_map (fun (a, b) ->
+        match (proc_one ltbl rtbl lkey a, proc_one rtbl ltbl rkey b) with
+            | (Some lres, Some rres) -> Stream.double lres rres
+            | (Some lres, None) -> Stream.single lres
+            | (None, Some rres) -> Stream.single rres
+            | (None, None) -> Stream.empty
+    )
+        
+
+    
+    
 
 (*
 
@@ -99,23 +157,41 @@ Probably need good/better utils for abstracting actions around tuples
 - modifying field values
 - changing keys
 
-filter (built in now!)
-
-map (built in now!)
-
-epoch:
-insert epoch boundary markers based on time values...
-
-
-groupby:
-    split by epoch markers
-    fold each epoch into hashtbl
-    emit hashtbl contents as result stream
-
-
 join:
     split each stream by epoch markers
     fold each stream,epoch into hashtbl
     emit matching between hashtbls as result stream
 
+... can do the thing where we keep table of key,value for each input, then emit tuple on match from either stream's process ... the issue if how to merge the resulting two match streams.
+
+
+Idea 2:
+
+both streams feed into respective hash tables.
+
+
+Idea 3:
+
+Hack to get interleaving:
+
+let merge l r =
+    Source.unfold (l,r) (fun (l, r) ->
+        match (Stream.first l, Stream.first r) with
+            | (Some a, Some b) -> Some ((a,b), (Stream.rest l, Stream.rest r))
+            | _ -> None
+    )
+
+... like a classic element-wise zip
+
+let zipper l r =
+    Source.unfold (l,r) (fun (l,r) ->
+        match (Stream.first l, Stream.first r) with
+            | (Some a, _) -> Some (a, (Stream.rest l, r))
+            | (_, Some a) -> Some (a, (l, Stream.rest r))
+            | (None, None) -> None
+    )
+
+... yeilds stream with all the elements of l followed by all the elements of r
+
 *)
+
