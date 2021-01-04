@@ -1,0 +1,7 @@
+(executable
+    (name pcap_stream)
+    (modes (native exe))
+    (ocamlopt_flags (:standard -O3))
+    (promote (until-clean))
+    (libraries pcap-format mmap ipaddr cstruct streaming)
+    (preprocess (pps ppx_cstruct)))

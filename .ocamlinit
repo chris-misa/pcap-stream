@@ -1,0 +1,8 @@
+(* This file allows loading the sources in this directory directly in ocaml or utop to check type inference or play around *)
+#require "pcap-format"
+#require "mmap"
+#require "ipaddr"
+#require "cstruct"
+#require "ppx_cstruct"
+#require "streaming"
+#mod_use "utils.ml"
