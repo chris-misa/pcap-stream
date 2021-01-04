@@ -1,5 +1,5 @@
 (executable
-    (name pcap_stream)
+    (name queries)
     (modes (native exe))
     (ocamlopt_flags (:standard -O3))
     (promote (until-clean))

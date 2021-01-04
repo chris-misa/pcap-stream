@@ -3,10 +3,18 @@
  * Based on Streaming module (https://github.com/odis-labs/streaming)
  *)
 
-open Printf
 open Streaming
 
 open Utils
+
+(* Bring filter and map into scope *)
+let filter f = Stream.filter (fun p -> Tuple.mem "epoch" p || f p)
+let map f = Stream.map (fun p ->
+    match Tuple.mem "epoch" p with
+        | true -> p
+        | false -> f p
+    )
+        
 
 (* Produce a stream of tuples parsed from headers in a given pcap file *)
 let of_pcap_file (file_name : string) : tuple stream =
